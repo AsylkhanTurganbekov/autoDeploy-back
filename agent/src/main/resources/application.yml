@@ -1,0 +1,10 @@
+spring:
+  application:
+    name: autodeploy-agent
+server:
+  shutdown: graceful
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
