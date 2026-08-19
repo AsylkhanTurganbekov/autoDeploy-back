@@ -1,0 +1,1 @@
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS target_server_id BIGINT REFERENCES managed_servers(id) ON DELETE SET NULL;

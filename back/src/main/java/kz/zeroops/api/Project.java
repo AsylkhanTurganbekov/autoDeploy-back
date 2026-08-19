@@ -16,6 +16,7 @@ public class Project {
   @Column(length = 255) private String domain;
   @Column(nullable = false) private boolean autoDeploy = true;
   @ManyToOne(fetch = FetchType.EAGER) @JoinColumn(name = "owner_id") private AppUser owner;
+  @ManyToOne(fetch = FetchType.EAGER) @JoinColumn(name = "target_server_id") private ManagedServer targetServer;
   @Column(nullable = false) private Instant createdAt = Instant.now();
 
   protected Project() {}
@@ -28,6 +29,7 @@ public class Project {
     this.name = name; this.repositoryUrl = repositoryUrl; this.branch = branch; this.runtime = runtime; this.applicationPort = applicationPort;
   }
   public void assignOwner(AppUser owner) { this.owner = owner; }
+  public void assignTargetServer(ManagedServer server) { this.targetServer = server; }
   public Long getId() { return id; }
   public String getName() { return name; }
   public String getSlug() { return slug; }
@@ -39,4 +41,5 @@ public class Project {
   public boolean isAutoDeploy() { return autoDeploy; }
   public Instant getCreatedAt() { return createdAt; }
   public AppUser getOwner() { return owner; }
+  public ManagedServer getTargetServer() { return targetServer; }
 }

@@ -36,6 +36,7 @@ services:
       SECRETS_MASTER_KEY: ${SECRETS_MASTER_KEY}
       JWT_SECRET: ${JWT_SECRET:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      MANIFEST_SIGNING_KEY: ${MANIFEST_SIGNING_KEY}
     depends_on:
       postgres: { condition: service_healthy }
     networks: [control-plane]

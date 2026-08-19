@@ -1,6 +1,8 @@
 spring:
   application:
     name: autodeploy-agent
+agent:
+  manifest-signing-key: ${MANIFEST_SIGNING_KEY:}
 server:
   shutdown: graceful
 management:
