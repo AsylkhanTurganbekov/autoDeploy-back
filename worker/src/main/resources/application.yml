@@ -1,0 +1,16 @@
+spring:
+  application:
+    name: autodeploy-worker
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/autodeploy}
+    username: ${SPRING_DATASOURCE_USERNAME:autodeploy}
+    password: ${SPRING_DATASOURCE_PASSWORD:autodeploy}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+server:
+  shutdown: graceful
+worker:
+  poll-interval-ms: ${WORKER_POLL_INTERVAL_MS:1000}

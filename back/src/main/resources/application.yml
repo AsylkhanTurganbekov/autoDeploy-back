@@ -1,0 +1,24 @@
+spring:
+  application:
+    name: autodeploy-api
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/autodeploy}
+    username: ${SPRING_DATASOURCE_USERNAME:autodeploy}
+    password: ${SPRING_DATASOURCE_PASSWORD:autodeploy}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+server:
+  shutdown: graceful

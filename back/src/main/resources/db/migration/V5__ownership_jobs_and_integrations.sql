@@ -1,0 +1,24 @@
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS owner_id BIGINT REFERENCES app_users(id) ON DELETE SET NULL;
+ALTER TABLE deployments ADD COLUMN IF NOT EXISTS project_id BIGINT REFERENCES projects(id) ON DELETE SET NULL;
+ALTER TABLE deployments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE deployments ADD COLUMN IF NOT EXISTS failure_reason VARCHAR(1000);
+CREATE TABLE IF NOT EXISTS github_connections (
+  id BIGSERIAL PRIMARY KEY, owner_id BIGINT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+  account VARCHAR(255) NOT NULL, token_ciphertext TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE(owner_id, account)
+);
+CREATE TABLE IF NOT EXISTS jobs (
+  id BIGSERIAL PRIMARY KEY, type VARCHAR(32) NOT NULL, status VARCHAR(16) NOT NULL, project_id BIGINT REFERENCES projects(id) ON DELETE CASCADE,
+  deployment_id BIGINT REFERENCES deployments(id) ON DELETE CASCADE, payload TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 3, failure_reason VARCHAR(1000), created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), dedupe_key VARCHAR(255) UNIQUE
+);
+CREATE INDEX IF NOT EXISTS jobs_pending_idx ON jobs(status, created_at);
+CREATE TABLE IF NOT EXISTS analyzer_results (
+  id BIGSERIAL PRIMARY KEY, project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, status VARCHAR(16) NOT NULL,
+  detected_runtime VARCHAR(32), application_port INTEGER, summary VARCHAR(1000), evidence TEXT, error_message VARCHAR(1000),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS webhook_events (
+  id BIGSERIAL PRIMARY KEY, delivery_id VARCHAR(255) NOT NULL UNIQUE, event_type VARCHAR(64) NOT NULL,
+  repository_full_name VARCHAR(512), action VARCHAR(128), received_at TIMESTAMPTZ NOT NULL DEFAULT now(), status VARCHAR(32) NOT NULL
+);
