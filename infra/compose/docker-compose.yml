@@ -36,7 +36,10 @@ services:
       SECRETS_MASTER_KEY: ${SECRETS_MASTER_KEY}
       JWT_SECRET: ${JWT_SECRET:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
-      MANIFEST_SIGNING_KEY: ${MANIFEST_SIGNING_KEY}
+      MANIFEST_SIGNING_KEY: ${MANIFEST_SIGNING_KEY:-}
+      AI_ADVISOR_URL: ${AI_ADVISOR_URL:-}
+      AI_ADVISOR_API_KEY: ${AI_ADVISOR_API_KEY:-}
+      AI_ADVISOR_MODEL: ${AI_ADVISOR_MODEL:-openai/gpt-oss-120b}
     depends_on:
       postgres: { condition: service_healthy }
     networks: [control-plane]

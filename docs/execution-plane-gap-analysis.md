@@ -9,16 +9,16 @@
 
 ## Simulation / demo (не execution plane)
 
-- `GET /api/v1/servers` returns a static server card; there is no `Server` database model, ownership or enrollment.
+- Server records, ownership, one-time enrollment and Agent heartbeats are implemented locally.
 - The worker explicitly does not clone repositories, invoke Docker, route traffic or perform a real health check.
-- Monitoring/server resources are demo data, not Agent heartbeats.
-- No current/previous running image, routing state or rollback operation exists.
+- Dashboard-level infrastructure metrics are still demo data; heartbeat persistence is real.
+- Rollback queues the previous successful commit through the signed Agent path; persisted routing/image state remains required before production routing is enabled.
 
 ## Absent and required before production execution
 
-1. Multi-server models, RBAC, one-time enrollment, heartbeats and audit events.
-2. A separate Agent with a limited Docker executor and no remote root/SSH credentials in control plane.
-3. Signed, expiring, server-bound deployment manifests; no raw commands or repository Compose files.
+1. Audit events and richer server RBAC.
+2. Real source fetch, immutable image build and health verification in the isolated Agent executor.
+3. Persisted routing version and Agent log ingestion with resume offsets.
 4. Real source fetch, immutable image build, constrained candidate container, health check and idempotent cleanup.
 5. An Agent-owned proxy strategy for clean servers; an approved isolated Nginx include strategy for the existing server only.
 6. Persisted routing version, rollback operation and Agent log ingestion with resume offsets.
@@ -26,4 +26,4 @@
 
 ## Delivery boundary
 
-The next code increment is Phase 1: real Servers + enrollment in the local control plane. It will not connect to or modify any remote server. A remote server remains read-only until an explicit integration plan is approved.
+The next production increment is routing/image-state persistence and an Agent-owned proxy for clean target hosts. A remote server remains read-only until an explicit integration plan is approved.
