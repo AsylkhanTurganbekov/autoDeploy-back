@@ -29,11 +29,23 @@ docker compose --env-file .env -f infra/compose/docker-compose.yml up --build
 - AES-GCM шифрование secret env-переменных: значение не возвращается API/UI.
 - GitHub connector проверяет personal access token через GitHub API, хранит его только зашифрованным и умеет получать branches. Token никогда не попадает в response или логи.
 - GitHub webhook принимает `push`/`pull_request` delivery, проверяет `X-Hub-Signature-256` и дедуплицирует `X-GitHub-Delivery`.
-- Analyzer и deployment worker сохраняют результаты/логи без доступа к Docker socket.
+- Servers API with owner checks, one-time enrollment, Agent credentials and persisted heartbeats.
+- Separate Java Agent polls outbound-only, verifies expiring HMAC manifests, sends execution logs/status and defaults to `dry-run`.
+- Safe rollback creates a new queued deployment for the previous successful commit; it does not issue host commands from the UI.
+- Optional read-only AI advisor sends only sanitized project metadata and cannot access secrets, Docker or SSH.
 
 ## Ограничения MVP сейчас
 
-GitHub OAuth App (вместо PAT), полноценное `git clone` с transient credential, удалённый deployment-agent, registry, Docker build/run, Traefik/HTTPS и Prometheus ещё не включены. Это осознанная security-граница: рабочий процесс не получает произвольные команды, токены или доступ к Docker/production server.
+GitHub OAuth App (вместо PAT), transient `git clone`/build registry, routing state, proxy automation and Prometheus are not included. Agent Docker mode is opt-in and still requires a separately approved target-host integration plan. This is an intentional security boundary: neither UI, API nor worker receives arbitrary Docker/production-server control.
+
+## Target-server Agent flow
+
+1. Add a server in **Серверы**, then generate its one-time enrollment token.
+2. On the target server (only after a reviewed plan), run the separate Agent with `CONTROL_PLANE_URL`, `AGENT_SERVER_ID`, `AGENT_CREDENTIAL` and the same `MANIFEST_SIGNING_KEY`.
+3. Keep `AGENT_EXECUTION_MODE=dry-run` for connectivity verification. Docker mode is an explicit opt-in and is never enabled by the Control Plane.
+4. Create a project selecting an `ONLINE` server. Deployment logs/status return through the Agent and are available over browser SSE.
+
+Never place the enrollment token, Agent credential, manifest key or AI key in Git.
 
 ## Local verification
 
