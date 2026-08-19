@@ -7,6 +7,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -33,12 +34,13 @@ class AgentPoller {
         if (manifest.isPresent()) result(manifest.get().deploymentId(), false, "Agent rejected unsafe or expired deployment manifest.", "Manifest validation failed");
         return;
       }
-      DeploymentExecutor.ExecutionResult executed=executor.execute(manifest.get()); result(manifest.get().deploymentId(),executed.success(),executed.message(),executed.failureReason());
+      DeploymentExecutor.ExecutionResult executed=executor.execute(manifest.get()); log(manifest.get().deploymentId(),executed.message()); result(manifest.get().deploymentId(),executed.success(),executed.message(),executed.failureReason());
     } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
       catch (Exception ignored) { /* transient failures are retried without logging secrets */ }
   }
   private void heartbeat() { try { String body = json.writeValueAsString(Map.of("cpuPercent", 0, "ramPercent", 0, "diskPercent", 0, "managedContainers", 0, "agentVersion", "0.1.0")); http.sendAsync(request("/api/v1/agent/" + serverId + "/heartbeat").header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)).build(), HttpResponse.BodyHandlers.discarding()); } catch (Exception ignored) { } }
   private void result(String deploymentId, boolean success, String message, String reason) { try { String body = json.writeValueAsString(Map.of("success", success, "message", message, "reason", reason == null ? "" : reason)); http.sendAsync(request("/api/v1/agent/" + serverId + "/deployments/" + deploymentId + "/result").header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)).build(), HttpResponse.BodyHandlers.discarding()); } catch (Exception ignored) { } }
+  private void log(String deploymentId,String message) { try { String body=json.writeValueAsString(Map.of("messages",List.of(message))); http.sendAsync(request("/api/v1/agent/"+serverId+"/deployments/"+deploymentId+"/logs").header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(body,StandardCharsets.UTF_8)).build(),HttpResponse.BodyHandlers.discarding()); } catch(Exception ignored){} }
   private HttpRequest.Builder request(String path) { return HttpRequest.newBuilder(URI.create(base + path)).timeout(Duration.ofSeconds(15)).header("X-Agent-Token", credential); }
   record Signed(String payload, String signature) { }
 }
