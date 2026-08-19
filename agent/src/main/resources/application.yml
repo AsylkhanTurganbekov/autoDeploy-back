@@ -3,6 +3,10 @@ spring:
     name: autodeploy-agent
 agent:
   manifest-signing-key: ${MANIFEST_SIGNING_KEY:}
+  control-plane-url: ${CONTROL_PLANE_URL:}
+  credential: ${AGENT_CREDENTIAL:}
+  server-id: ${AGENT_SERVER_ID:0}
+  poll-ms: ${AGENT_POLL_MS:5000}
 server:
   shutdown: graceful
 management:

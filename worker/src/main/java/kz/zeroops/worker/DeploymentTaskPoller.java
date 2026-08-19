@@ -28,6 +28,12 @@ class DeploymentTaskPoller {
     catch (Exception e) { db.update("UPDATE jobs SET status='FAILED', failure_reason=?, updated_at=now() WHERE id=?", safe(e.getMessage()),job.get("id")); if(job.get("deployment")!=null) db.update("UPDATE deployments SET status='FAILED', failure_reason=?, updated_at=now() WHERE id=?",safe(e.getMessage()),job.get("deployment")); }
   }
   private void deploy(Long jobId, Long deploymentId) throws InterruptedException {
+    Boolean assignedToAgent = db.queryForObject("SELECT p.target_server_id IS NOT NULL FROM deployments d JOIN projects p ON p.id=d.project_id WHERE d.id=?", Boolean.class, deploymentId);
+    if (Boolean.TRUE.equals(assignedToAgent)) {
+      db.update("INSERT INTO deployment_logs(deployment_id,line_number,message,created_at) VALUES (?,COALESCE((SELECT MAX(line_number)+1 FROM deployment_logs WHERE deployment_id=?),1),?,now())", deploymentId, deploymentId, "Deployment queued for the assigned server Agent.");
+      complete(jobId);
+      return;
+    }
     stage(deploymentId,"CHECKOUT","Repository checkout accepted; no credentials are written to logs.");
     stage(deploymentId,"ANALYZING","Allowlisted runtime manifest validated.");
     stage(deploymentId,"BUILDING","Build queued for a future isolated server agent; Docker socket is unavailable to this worker.");

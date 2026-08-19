@@ -16,7 +16,7 @@ public class Deployment {
   @Column(length = 1000) private String failureReason;
   protected Deployment() {}
   public Deployment(String projectSlug, String commitSha) { this.projectSlug = projectSlug; this.commitSha = commitSha; this.status = DeploymentStatus.QUEUED; }
-  public void moveTo(DeploymentStatus status) { this.status = status; }
+  public void moveTo(DeploymentStatus status) { this.status = status; this.updatedAt = Instant.now(); }
   public void attach(Project project) { this.project = project; }
   public void moveTo(DeploymentStatus status, String failureReason) { this.status = status; this.failureReason = failureReason; this.updatedAt = Instant.now(); }
   public Long getId() { return id; }
