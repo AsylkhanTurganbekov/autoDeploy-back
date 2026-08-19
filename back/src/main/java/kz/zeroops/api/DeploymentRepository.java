@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 public interface DeploymentRepository extends JpaRepository<Deployment, Long> {
   List<Deployment> findAllByOrderByCreatedAtDesc();
   List<Deployment> findAllByProjectIdOrderByCreatedAtDesc(Long projectId);
+  java.util.Optional<Deployment> findFirstByProjectIdAndStatusAndIdNotOrderByCreatedAtDesc(Long projectId, DeploymentStatus status, Long excludedId);
   List<Deployment> findAllByProjectOwnerIdOrderByCreatedAtDesc(Long ownerId);
   @Query("select d from Deployment d left join fetch d.project p left join fetch p.owner where d.id = :id")
   Optional<Deployment> findWithProjectAndOwnerById(Long id);
