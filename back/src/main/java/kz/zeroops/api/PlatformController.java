@@ -30,7 +30,6 @@ public class PlatformController {
   @GetMapping("/repositories") public List<RepositoryResponse> repositories() {
     return List.of(new RepositoryResponse("demo/spring-service", "https://github.com/demo/spring-service", "main", "SPRING_BOOT"), new RepositoryResponse("demo/next-store", "https://github.com/demo/next-store", "main", "NODE"));
   }
-  @GetMapping("/servers") public List<ServerResponse> servers() { return List.of(server()); }
   @GetMapping("/monitoring") public MonitoringResponse monitoring() {
     return new MonitoringResponse("HEALTHY", "4d 12h", 23, "1.4 / 4 GB", 128, 142, 99.98,
         List.of(18,21,16,24,20,31,27,23,29,22,25,23), List.of(1.1,1.2,1.15,1.3,1.25,1.45,1.38,1.4,1.32,1.5,1.4,1.4), List.of(104,121,110,137,128,152,143,131,166,148,133,128));
