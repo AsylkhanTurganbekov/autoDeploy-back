@@ -35,7 +35,7 @@ class AgentPoller {
         if (manifest.isPresent()) result(manifest.get().deploymentId(), false, "Agent rejected unsafe or expired deployment manifest.", "Manifest validation failed");
         return;
       }
-      DeploymentExecutor.ExecutionResult executed=executor.execute(manifest.get()); log(manifest.get().deploymentId(),executed.message()); result(manifest.get().deploymentId(),executed.success(),executed.message(),executed.failureReason());
+      DeploymentExecutor.ExecutionResult executed=executor.execute(manifest.get(),line->log(manifest.get().deploymentId(),line)); log(manifest.get().deploymentId(),executed.message()); result(manifest.get().deploymentId(),executed.success(),executed.message(),executed.failureReason());
     } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
       catch (Exception ignored) { /* transient failures are retried without logging secrets */ }
   }

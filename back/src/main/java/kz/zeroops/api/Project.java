@@ -13,6 +13,8 @@ public class Project {
   @Column(nullable = false, length = 255) private String branch;
   @Enumerated(EnumType.STRING) @Column(nullable = false, length = 32) private ProjectRuntime runtime;
   @Column(nullable = false) private Integer applicationPort;
+  @Column private Integer publicPort;
+  @Column(nullable = false, length = 256) private String healthPath = "/health";
   @Column(length = 255) private String domain;
   @Column(nullable = false) private boolean autoDeploy = true;
   @ManyToOne(fetch = FetchType.EAGER) @JoinColumn(name = "owner_id") private AppUser owner;
@@ -20,13 +22,13 @@ public class Project {
   @Column(nullable = false) private Instant createdAt = Instant.now();
 
   protected Project() {}
-  public Project(String name, String slug, String repositoryUrl, String branch, ProjectRuntime runtime, Integer applicationPort) {
+  public Project(String name, String slug, String repositoryUrl, String branch, ProjectRuntime runtime, Integer applicationPort, Integer publicPort, String healthPath) {
     this.name = name; this.slug = slug; this.repositoryUrl = repositoryUrl; this.branch = branch;
-    this.runtime = runtime; this.applicationPort = applicationPort;
+    this.runtime = runtime; this.applicationPort = applicationPort; this.publicPort = publicPort; this.healthPath = healthPath;
   }
   public void configureDelivery(String domain, boolean autoDeploy) { this.domain = domain; this.autoDeploy = autoDeploy; }
-  public void update(String name, String repositoryUrl, String branch, ProjectRuntime runtime, Integer applicationPort) {
-    this.name = name; this.repositoryUrl = repositoryUrl; this.branch = branch; this.runtime = runtime; this.applicationPort = applicationPort;
+  public void update(String name, String repositoryUrl, String branch, ProjectRuntime runtime, Integer applicationPort, Integer publicPort, String healthPath) {
+    this.name = name; this.repositoryUrl = repositoryUrl; this.branch = branch; this.runtime = runtime; this.applicationPort = applicationPort; this.publicPort = publicPort; this.healthPath = healthPath;
   }
   public void assignOwner(AppUser owner) { this.owner = owner; }
   public void assignTargetServer(ManagedServer server) { this.targetServer = server; }
@@ -37,6 +39,8 @@ public class Project {
   public String getBranch() { return branch; }
   public ProjectRuntime getRuntime() { return runtime; }
   public Integer getApplicationPort() { return applicationPort; }
+  public Integer getPublicPort() { return publicPort; }
+  public String getHealthPath() { return healthPath; }
   public String getDomain() { return domain; }
   public boolean isAutoDeploy() { return autoDeploy; }
   public Instant getCreatedAt() { return createdAt; }
