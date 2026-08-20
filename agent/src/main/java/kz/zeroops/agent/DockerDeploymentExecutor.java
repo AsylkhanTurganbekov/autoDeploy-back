@@ -3,13 +3,8 @@ package kz.zeroops.agent;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -22,7 +17,6 @@ import org.springframework.stereotype.Component;
 @Component
 @ConditionalOnProperty(name = "agent.execution-mode", havingValue = "docker")
 class DockerDeploymentExecutor implements DeploymentExecutor {
-  private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
   private final String agentContainerName;
 
   DockerDeploymentExecutor(@Value("${agent.container-name:}") String agentContainerName) {
@@ -101,14 +95,19 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
   private boolean healthy(String privateIp, AgentBoundary.Manifest manifest, Consumer<String> log) {
     String url = "http://" + privateIp + ":" + manifest.applicationPort() + manifest.healthPath();
     for (int attempt = 1; attempt <= 30; attempt++) {
-      try {
-        HttpResponse<Void> response = http.send(HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(3)).GET().build(), HttpResponse.BodyHandlers.discarding());
-        if (response.statusCode() >= 200 && response.statusCode() < 400) { log.accept("Health check passed (HTTP " + response.statusCode() + ")."); return true; }
-      } catch (Exception ignored) { }
+      if (probe(url)) { log.accept("Health check passed."); return true; }
       try { Thread.sleep(1000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return false; }
       if (attempt % 5 == 0) log.accept("Waiting for health check (attempt " + attempt + "/30).");
     }
     return false;
+  }
+  private boolean probe(String url) {
+    try {
+      Process process = new ProcessBuilder("wget", "-q", "--spider", "--timeout=3", url).start();
+      if (!process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) { process.destroyForcibly(); return false; }
+      return process.exitValue() == 0;
+    } catch (IOException e) { return false; }
+    catch (InterruptedException e) { Thread.currentThread().interrupt(); return false; }
   }
 
   private boolean run(List<String> command, Consumer<String> log) {
