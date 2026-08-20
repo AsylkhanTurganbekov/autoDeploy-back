@@ -53,7 +53,8 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
         return failed("Docker rejected the isolated container.");
       }
       agentConnected = connectAgent(network, log);
-      if (!agentConnected || !healthy(name, manifest, log)) {
+      String privateIp = agentConnected ? containerIp(name, log) : null;
+      if (privateIp == null || privateIp.isBlank() || !healthy(privateIp, manifest, log)) {
         run(List.of("docker", "rm", "--force", name), log);
         restore(previousImage, network, manifest, log);
         return failed("Health check failed; previous image was restored when available.");
@@ -94,8 +95,11 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
     }
     return run(List.of("docker", "network", "connect", network, agentContainerName), log);
   }
-  private boolean healthy(String containerName, AgentBoundary.Manifest manifest, Consumer<String> log) {
-    String url = "http://" + containerName + ":" + manifest.applicationPort() + manifest.healthPath();
+  private String containerIp(String containerName, Consumer<String> log) {
+    return first(output(List.of("docker", "inspect", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", containerName), log));
+  }
+  private boolean healthy(String privateIp, AgentBoundary.Manifest manifest, Consumer<String> log) {
+    String url = "http://" + privateIp + ":" + manifest.applicationPort() + manifest.healthPath();
     for (int attempt = 1; attempt <= 30; attempt++) {
       try {
         HttpResponse<Void> response = http.send(HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(3)).GET().build(), HttpResponse.BodyHandlers.discarding());
