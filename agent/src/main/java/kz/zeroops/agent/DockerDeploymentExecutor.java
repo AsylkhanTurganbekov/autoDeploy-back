@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.function.Consumer;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -22,12 +23,18 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(name = "agent.execution-mode", havingValue = "docker")
 class DockerDeploymentExecutor implements DeploymentExecutor {
   private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
+  private final String agentContainerName;
+
+  DockerDeploymentExecutor(@Value("${agent.container-name:}") String agentContainerName) {
+    this.agentContainerName = agentContainerName;
+  }
 
   @Override public ExecutionResult execute(AgentBoundary.Manifest manifest, Consumer<String> log) {
     Path workspace = null;
     String network = "autodeploy-net-" + manifest.projectId();
     String name = "autodeploy-" + manifest.projectId() + "-" + manifest.deploymentId();
     String previousImage = null;
+    boolean agentConnected = false;
     try {
       workspace = Files.createTempDirectory("autodeploy-" + manifest.deploymentId() + "-");
       log.accept("Checking out the verified GitHub commit.");
@@ -45,14 +52,18 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
         restore(previousImage, network, manifest, log);
         return failed("Docker rejected the isolated container.");
       }
-      if (!healthy(manifest, log)) {
+      agentConnected = connectAgent(network, log);
+      if (!agentConnected || !healthy(name, manifest, log)) {
         run(List.of("docker", "rm", "--force", name), log);
         restore(previousImage, network, manifest, log);
         return failed("Health check failed; previous image was restored when available.");
       }
       return new ExecutionResult(true, "Image built, isolated container started and health check passed.", null);
     } catch (IOException e) { return failed("Agent workspace is unavailable."); }
-    finally { deleteWorkspace(workspace); }
+    finally {
+      if (agentConnected) run(List.of("docker", "network", "disconnect", network, agentContainerName), log);
+      deleteWorkspace(workspace);
+    }
   }
 
   private boolean start(String name, String image, String network, AgentBoundary.Manifest manifest, Consumer<String> log) {
@@ -76,8 +87,15 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
     log.accept("Restoring the previous managed image.");
     start("autodeploy-" + manifest.projectId() + "-rollback-" + manifest.deploymentId(), image, network, manifest, log);
   }
-  private boolean healthy(AgentBoundary.Manifest manifest, Consumer<String> log) {
-    String url = "http://host.docker.internal:" + manifest.publicPort() + manifest.healthPath();
+  private boolean connectAgent(String network, Consumer<String> log) {
+    if (agentContainerName == null || agentContainerName.isBlank()) {
+      log.accept("Agent container name is not configured; private health check is unavailable.");
+      return false;
+    }
+    return run(List.of("docker", "network", "connect", network, agentContainerName), log);
+  }
+  private boolean healthy(String containerName, AgentBoundary.Manifest manifest, Consumer<String> log) {
+    String url = "http://" + containerName + ":" + manifest.applicationPort() + manifest.healthPath();
     for (int attempt = 1; attempt <= 30; attempt++) {
       try {
         HttpResponse<Void> response = http.send(HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(3)).GET().build(), HttpResponse.BodyHandlers.discarding());
