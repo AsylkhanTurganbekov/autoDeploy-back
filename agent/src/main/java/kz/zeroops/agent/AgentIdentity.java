@@ -85,19 +85,23 @@ class AgentIdentity {
 
   private void persist() throws IOException {
     Files.createDirectories(identityPath.getParent());
-    setOwnerOnly(identityPath.getParent());
+    setDirectoryOwnerOnly(identityPath.getParent());
     Path temporary = Files.createTempFile(identityPath.getParent(), "identity-", ".tmp");
     try {
       Files.writeString(temporary, json.writeValueAsString(new StoredIdentity(serverId, credential)), StandardCharsets.UTF_8);
-      setOwnerOnly(temporary);
+      setFileOwnerOnly(temporary);
       try { Files.move(temporary, identityPath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING); }
       catch (java.nio.file.AtomicMoveNotSupportedException ignored) { Files.move(temporary, identityPath, StandardCopyOption.REPLACE_EXISTING); }
-      setOwnerOnly(identityPath);
+      setFileOwnerOnly(identityPath);
     } finally { Files.deleteIfExists(temporary); }
   }
 
-  private static void setOwnerOnly(Path path) {
+  private static void setDirectoryOwnerOnly(Path path) {
     try { Files.setPosixFilePermissions(path, Set.of(java.nio.file.attribute.PosixFilePermission.OWNER_READ, java.nio.file.attribute.PosixFilePermission.OWNER_WRITE, java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE)); }
+    catch (Exception ignored) { }
+  }
+  private static void setFileOwnerOnly(Path path) {
+    try { Files.setPosixFilePermissions(path, Set.of(java.nio.file.attribute.PosixFilePermission.OWNER_READ, java.nio.file.attribute.PosixFilePermission.OWNER_WRITE)); }
     catch (Exception ignored) { }
   }
   private record EnrollmentRequest(String token) { }
