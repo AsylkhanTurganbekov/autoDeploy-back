@@ -6,6 +6,8 @@ agent:
   control-plane-url: ${CONTROL_PLANE_URL:}
   credential: ${AGENT_CREDENTIAL:}
   server-id: ${AGENT_SERVER_ID:0}
+  enrollment-token: ${AGENT_ENROLLMENT_TOKEN:}
+  identity-path: ${AGENT_IDENTITY_PATH:/var/lib/autodeploy-agent/identity.json}
   poll-ms: ${AGENT_POLL_MS:5000}
   execution-mode: ${AGENT_EXECUTION_MODE:dry-run}
 server:

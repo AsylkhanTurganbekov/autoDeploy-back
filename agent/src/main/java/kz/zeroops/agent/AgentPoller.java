@@ -16,14 +16,15 @@ import org.springframework.stereotype.Component;
 /** Outbound-only transport: verified manifests only, never arbitrary commands. */
 @Component
 class AgentPoller {
-  private final String base; private final String credential; private final long serverId;
   private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
   private final ObjectMapper json; private final ManifestVerifier verifier; private final DeploymentExecutor executor;
-  AgentPoller(@Value("${agent.control-plane-url}") String base, @Value("${agent.credential}") String credential, @Value("${agent.server-id}") long serverId, ObjectMapper json, ManifestVerifier verifier, DeploymentExecutor executor) {
-    this.base = base == null ? "" : base.replaceFirst("/+$", ""); this.credential = credential; this.serverId = serverId; this.json = json; this.verifier = verifier; this.executor=executor;
+  private final AgentIdentity identity;
+  AgentPoller(AgentIdentity identity, ObjectMapper json, ManifestVerifier verifier, DeploymentExecutor executor) {
+    this.identity = identity; this.json = json; this.verifier = verifier; this.executor=executor;
   }
   @Scheduled(fixedDelayString = "${agent.poll-ms}") void poll() {
-    if (base.isBlank() || credential.isBlank() || serverId <= 0) return;
+    if (!identity.ensureRegistered()) return;
+    long serverId = identity.serverId();
     heartbeat();
     try {
       HttpResponse<String> response = http.send(request("/api/v1/agent/" + serverId + "/deployments/next").GET().build(), HttpResponse.BodyHandlers.ofString());
@@ -41,6 +42,6 @@ class AgentPoller {
   private void heartbeat() { try { String body = json.writeValueAsString(Map.of("cpuPercent", 0, "ramPercent", 0, "diskPercent", 0, "managedContainers", 0, "agentVersion", "0.1.0")); http.sendAsync(request("/api/v1/agent/" + serverId + "/heartbeat").header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)).build(), HttpResponse.BodyHandlers.discarding()); } catch (Exception ignored) { } }
   private void result(String deploymentId, boolean success, String message, String reason) { try { String body = json.writeValueAsString(Map.of("success", success, "message", message, "reason", reason == null ? "" : reason)); http.sendAsync(request("/api/v1/agent/" + serverId + "/deployments/" + deploymentId + "/result").header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)).build(), HttpResponse.BodyHandlers.discarding()); } catch (Exception ignored) { } }
   private void log(String deploymentId,String message) { try { String body=json.writeValueAsString(Map.of("messages",List.of(message))); http.sendAsync(request("/api/v1/agent/"+serverId+"/deployments/"+deploymentId+"/logs").header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(body,StandardCharsets.UTF_8)).build(),HttpResponse.BodyHandlers.discarding()); } catch(Exception ignored){} }
-  private HttpRequest.Builder request(String path) { return HttpRequest.newBuilder(URI.create(base + path)).timeout(Duration.ofSeconds(15)).header("X-Agent-Token", credential); }
+  private HttpRequest.Builder request(String path) { return HttpRequest.newBuilder(URI.create(identity.baseUrl() + path)).timeout(Duration.ofSeconds(15)).header("X-Agent-Token", identity.credential()); }
   record Signed(String payload, String signature) { }
 }

@@ -4,7 +4,9 @@ The Agent runs on a target server and makes outbound HTTPS requests to the Contr
 
 It does not accept arbitrary shell commands. The default executor is `dry-run`; `AGENT_EXECUTION_MODE=docker` is an explicit opt-in and uses fixed Docker arguments with resource and privilege restrictions. Mounting a Docker socket or changing Nginx on a target server requires a separately reviewed integration plan and operator approval.
 
-Required runtime variables are `CONTROL_PLANE_URL`, `AGENT_SERVER_ID`, `AGENT_CREDENTIAL`, and the same base64 `MANIFEST_SIGNING_KEY` configured in the Control Plane. Enrollment credentials and signing keys must be supplied via the target host's secret manager or protected environment, never committed to Git.
+For first registration set `CONTROL_PLANE_URL`, `AGENT_ENROLLMENT_TOKEN`, and the same base64 `MANIFEST_SIGNING_KEY` configured in the Control Plane. The Agent exchanges the one-time token for its own credential and persists that identity in `AGENT_IDENTITY_PATH` with owner-only permissions. On later starts it uses that persisted identity; enrollment tokens must be delivered through a protected runtime secret and never committed to Git.
+
+`AGENT_SERVER_ID` and `AGENT_CREDENTIAL` remain supported for an operator-managed identity, but must also come from protected runtime secret storage.
 
 Run locally for compilation only:
 
