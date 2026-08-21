@@ -31,9 +31,9 @@ docker compose --env-file .env -f infra/compose/docker-compose.yml up --build
 - GitHub webhook принимает `push`/`pull_request` delivery, проверяет `X-Hub-Signature-256` и дедуплицирует `X-GitHub-Delivery`.
 - Servers API with owner checks, one-time enrollment, Agent credentials and persisted heartbeats.
 - Separate Java Agent polls outbound-only, verifies expiring HMAC manifests, sends execution logs/status and defaults to `dry-run`.
-- In the explicit Docker mode, the Agent creates a separate Docker network per project, applies fixed resource limits, determines an internal port only by static `Dockerfile EXPOSE` inspection, and allocates a public port only in `18100–18999`. It never edits host Nginx or binds `80/443`.
+- In the explicit Docker mode, the Agent statically detects Node.js, Spring Boot, Python, Go, .NET and repository-Dockerfile services. It stores a service plan, accepts only one public service at a time, creates a separate Docker network per project, applies fixed resource limits, validates repository Dockerfiles, and creates only reviewed temporary Dockerfile templates when absent. It allocates a public port only in `18100–18999`; it never edits host Nginx or binds `80/443`.
 - Safe rollback creates a new queued deployment for the previous successful commit; it does not issue host commands from the UI.
-- Optional read-only AI advisor sends only sanitized project metadata and cannot access secrets, Docker or SSH.
+- Optional NITEC-compatible `DeploymentPlanner` returns a strictly validated JSON recommendation from sanitized static metadata. It cannot access secrets, Docker, SSH, host configuration, raw repository contents or emit commands; deterministic policy is the fallback.
 
 ## Ограничения MVP сейчас
 
@@ -44,7 +44,7 @@ GitHub OAuth App (вместо PAT), transient `git clone`/build registry, routi
 1. Add a server in **Серверы**, then generate its one-time enrollment token.
 2. On the target server (only after a reviewed plan), run the separate Agent with `CONTROL_PLANE_URL`, `AGENT_SERVER_ID`, `AGENT_CREDENTIAL` and the same `MANIFEST_SIGNING_KEY`.
 3. Keep `AGENT_EXECUTION_MODE=dry-run` for connectivity verification. Docker mode is an explicit opt-in and is never enabled by the Control Plane.
-4. In **Новый проект** enter only the GitHub URL, branch and `ONLINE` server. The control plane creates a signed deployment; the Agent reads the repository's root Dockerfile, allocates an AutoDeploy port and starts the isolated container.
+4. In **Новый проект** enter only the GitHub URL, branch and `ONLINE` server. The Agent receives a signed manifest, statically scans the repository, selects or reports services, validates/generates a Dockerfile template, allocates an AutoDeploy port and starts an isolated container.
 5. Deployment logs/status return through the Agent and are available over browser SSE. After a success, the selected application port is saved on the project and the test URL is `http://SERVER_IP:ASSIGNED_PORT` until a domain is configured.
 
 Never place the enrollment token, Agent credential, manifest key or AI key in Git.

@@ -21,11 +21,18 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
   private static final int LAST_PUBLIC_PORT = 18999;
   private final String agentContainerName;
   private final String githubDeployKey;
+  private final RepositoryScanner scanner;
+  private final DockerfileGenerator dockerfiles;
+  private final DockerfilePolicy dockerfilePolicy;
 
   DockerDeploymentExecutor(@Value("${agent.container-name:}") String agentContainerName,
-                           @Value("${agent.github-deploy-key:/tmp/.ssh/github_deploy_key}") String githubDeployKey) {
+                           @Value("${agent.github-deploy-key:/run/autodeploy/github_deploy_key}") String githubDeployKey,
+                           RepositoryScanner scanner, DockerfileGenerator dockerfiles, DockerfilePolicy dockerfilePolicy) {
     this.agentContainerName = agentContainerName;
     this.githubDeployKey = githubDeployKey;
+    this.scanner = scanner;
+    this.dockerfiles = dockerfiles;
+    this.dockerfilePolicy = dockerfilePolicy;
   }
 
   @Override public ExecutionResult execute(AgentBoundary.Manifest manifest, Consumer<String> log) {
@@ -35,39 +42,57 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
     String previousImage = null;
     int applicationPort = manifest.applicationPort();
     int publicPort = manifest.publicPort();
+    List<DeploymentExecutor.ServicePlan> plan = List.of();
     boolean agentConnected = false;
     try {
       workspace = Files.createTempDirectory("autodeploy-" + manifest.deploymentId() + "-");
       log.accept("Checking out the verified GitHub commit.");
       if (!clone(manifest.repositoryUrl(), manifest.branch(), workspace, log)) return failed("Git checkout failed.");
-      if (!run(List.of("git", "-C", workspace.toString(), "checkout", "--detach", manifest.commitSha()), log)) return failed("Requested commit is unavailable.");
-      applicationPort = detectedApplicationPort(workspace, manifest.applicationPort(), log);
+      if (manifest.commitSha().matches("[A-Fa-f0-9]{7,64}")
+          && !run(List.of("git", "-C", workspace.toString(), "checkout", "--detach", manifest.commitSha()), log)) {
+        return failed("Requested commit is unavailable.");
+      }
+      if (manifest.commitSha().startsWith("manual-")) {
+        log.accept("No immutable commit was supplied; deploying the checked-out branch head.");
+      }
+      List<RepositoryScanner.Service> services = scanner.scan(workspace);
+      if (services.isEmpty()) return failed("No supported deployable service was found by static analysis.");
+      plan = services.stream().map(s -> new DeploymentExecutor.ServicePlan(s.key(), s.path(), s.runtime(), s.port(), s.publicCandidate(), s.hasDockerfile(), s.evidence())).toList();
+      RepositoryScanner.Service service = selectService(services, manifest.servicePath());
+      if (service == null) return failed("Requested service path is not present in the static deployment plan.", plan);
+      log.accept("Static plan selected service " + service.key() + " at " + service.path() + " (" + service.runtime() + ").");
+      Path buildContext = service.path().equals(".") ? workspace : workspace.resolve(service.path()).normalize();
+      if (!buildContext.startsWith(workspace)) return failed("Unsafe service path was rejected.", plan);
+      Path dockerfile = dockerfiles.ensure(buildContext, service.runtime());
+      if (!service.hasDockerfile()) log.accept("Generated a reviewed Dockerfile template for " + service.runtime() + "; repository files were not otherwise changed.");
+      dockerfilePolicy.verify(dockerfile);
+      applicationPort = detectedApplicationPort(dockerfile, service.port(), log);
       if (publicPort == 0) {
         publicPort = nextPublicPort();
-        if (publicPort == 0) return failed("No free AutoDeploy public port is available in range 18100-18999.");
+        if (publicPort == 0) return failed("No free AutoDeploy public port is available in range 18100-18999.", plan);
         log.accept("Agent selected external port " + publicPort + " from the AutoDeploy range.");
       }
       if (!run(List.of("docker", "network", "inspect", network), log)) {
         log.accept("Creating isolated project network.");
-        if (!run(List.of("docker", "network", "create", "--label", "io.autodeploy.managed=true", "--label", "io.autodeploy.project=" + manifest.projectId(), network), log)) return failed("Project network cannot be created.");
+        if (!run(List.of("docker", "network", "create", "--label", "io.autodeploy.managed=true", "--label", "io.autodeploy.project=" + manifest.projectId(), network), log)) return failed("Project network cannot be created.", plan);
       }
       log.accept("Building immutable Docker image.");
-      if (!run(List.of("docker", "build", "--pull", "--tag", manifest.imageTag(), workspace.toString()), log)) return failed("Docker image build failed.");
+      if (!run(List.of("docker", "build", "--pull", "--file", dockerfile.toString(), "--tag", manifest.imageTag(), buildContext.toString()), log)) return failed("Docker image build failed.", plan);
       previousImage = previousImage(manifest.projectId(), log);
       stopManagedProject(manifest.projectId(), log);
       if (!start(name, manifest.imageTag(), network, manifest, applicationPort, publicPort, log)) {
         restore(previousImage, network, manifest, applicationPort, publicPort, log);
-        return failed("Docker rejected the isolated container.");
+        return failed("Docker rejected the isolated container.", plan);
       }
       agentConnected = connectAgent(network, log);
       String privateIp = agentConnected ? containerIp(name, log) : null;
       if (privateIp == null || privateIp.isBlank() || !healthy(privateIp, applicationPort, manifest.healthPath(), log)) {
         run(List.of("docker", "rm", "--force", name), log);
         restore(previousImage, network, manifest, applicationPort, publicPort, log);
-        return failed("Health check failed; previous image was restored when available.");
+        return failed("Health check failed; previous image was restored when available.", plan);
       }
-      return new ExecutionResult(true, "Image built, isolated container started and health check passed on port " + publicPort + ".", null, applicationPort, publicPort, manifest.runtime(), manifest.healthPath());
-    } catch (IOException e) { return failed("Agent workspace is unavailable."); }
+      return new ExecutionResult(true, "Image built, isolated container started and health check passed on port " + publicPort + ".", null, applicationPort, publicPort, service.runtime(), manifest.healthPath(), plan);
+    } catch (IOException e) { return new ExecutionResult(false, "Agent workspace is unavailable.", "Agent workspace is unavailable.", null, null, null, null, plan); }
     finally {
       if (agentConnected) run(List.of("docker", "network", "disconnect", network, agentContainerName), log);
       deleteWorkspace(workspace);
@@ -142,8 +167,7 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
   }
 
   /** Static inspection only: the Agent never runs repository scripts to guess configuration. */
-  private int detectedApplicationPort(Path workspace, int fallback, Consumer<String> log) {
-    Path dockerfile = workspace.resolve("Dockerfile");
+  private int detectedApplicationPort(Path dockerfile, int fallback, Consumer<String> log) {
     if (!Files.isRegularFile(dockerfile)) {
       log.accept("No Dockerfile found at repository root; using configured internal port " + fallback + ".");
       return fallback;
@@ -163,6 +187,13 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
     } catch (IOException ignored) { log.accept("Dockerfile could not be read; using configured internal port " + fallback + "."); }
     log.accept("Dockerfile exposes no supported port; using configured internal port " + fallback + ".");
     return fallback;
+  }
+
+  private RepositoryScanner.Service selectService(List<RepositoryScanner.Service> services, String requestedPath) {
+    if (requestedPath != null && !requestedPath.isBlank()) return services.stream().filter(s -> s.path().equals(requestedPath)).findFirst().orElse(null);
+    List<RepositoryScanner.Service> publicServices = services.stream().filter(RepositoryScanner.Service::publicCandidate).toList();
+    if (publicServices.size() == 1) return publicServices.getFirst();
+    return services.size() == 1 ? services.getFirst() : null;
   }
 
   private int nextPublicPort() {
@@ -186,6 +217,7 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
   private void stream(Process process, Consumer<String> log) throws IOException { try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) { String line; int sent = 0; while ((line = reader.readLine()) != null && sent++ < 500) log.accept(safe(line)); } }
   private static String safe(String line) { String sanitized = line.replaceAll("(?i)(token|password|secret|authorization)\\s*[=:]\\s*[^\\s]+", "$1=[redacted]"); return sanitized.substring(0, Math.min(sanitized.length(), 900)); }
   private static String first(List<String> lines) { return lines.isEmpty() ? null : lines.getFirst(); }
-  private static ExecutionResult failed(String reason) { return new ExecutionResult(false, reason, reason, null, null, null, null); }
+  private static ExecutionResult failed(String reason) { return new ExecutionResult(false, reason, reason, null, null, null, null, List.of()); }
+  private static ExecutionResult failed(String reason, List<DeploymentExecutor.ServicePlan> plan) { return new ExecutionResult(false, reason, reason, null, null, null, null, plan); }
   private static void deleteWorkspace(Path workspace) { if (workspace == null) return; try (var paths = Files.walk(workspace)) { paths.sorted(Comparator.reverseOrder()).forEach(path -> { try { Files.deleteIfExists(path); } catch (IOException ignored) { } }); } catch (IOException ignored) { } }
 }

@@ -10,6 +10,7 @@ public class Deployment {
   @Column(nullable = false, length = 200) private String projectSlug;
   @ManyToOne(fetch = FetchType.EAGER) @JoinColumn(name = "project_id") private Project project;
   @Column(nullable = false, length = 64) private String commitSha;
+  @Column(nullable = false, length = 200) private String servicePath = ".";
   @Enumerated(EnumType.STRING) @Column(nullable = false, length = 32) private DeploymentStatus status;
   @Column(nullable = false) private Instant createdAt = Instant.now();
   @Column(nullable = false) private Instant updatedAt = Instant.now();
@@ -22,6 +23,8 @@ public class Deployment {
   public Long getId() { return id; }
   public String getProjectSlug() { return projectSlug; }
   public String getCommitSha() { return commitSha; }
+  public String getServicePath() { return servicePath; }
+  public void setServicePath(String servicePath) { this.servicePath = servicePath == null || servicePath.isBlank() ? "." : servicePath; }
   public DeploymentStatus getStatus() { return status; }
   public Instant getCreatedAt() { return createdAt; }
   public Instant getUpdatedAt() { return updatedAt; }
