@@ -10,4 +10,4 @@ if [ -r /run/autodeploy/github_deploy_key ]; then
   fi
 fi
 
-exec su-exec agent java -jar /app/app.jar
+exec su-exec agent:"${AGENT_DOCKER_GID:-988}" java -jar /app/app.jar
