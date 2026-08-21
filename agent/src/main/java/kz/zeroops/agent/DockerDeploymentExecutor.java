@@ -146,8 +146,9 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
 
   private int nextPublicPort() {
     for (int port = FIRST_PUBLIC_PORT; port <= LAST_PUBLIC_PORT; port++) {
+      int candidate = port;
       List<String> used = output(List.of("docker", "ps", "--format", "{{.Ports}}"), ignored -> { });
-      boolean occupied = used.stream().anyMatch(value -> value.matches(".*[:.]" + port + "->.*"));
+      boolean occupied = used.stream().anyMatch(value -> value.matches(".*[:.]" + candidate + "->.*"));
       if (!occupied) return port;
     }
     return 0;
