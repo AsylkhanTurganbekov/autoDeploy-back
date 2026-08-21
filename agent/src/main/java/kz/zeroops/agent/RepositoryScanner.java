@@ -44,7 +44,7 @@ class RepositoryScanner {
         dotnet = children.anyMatch(p -> p.getFileName().toString().endsWith(".csproj"));
       }
       if (!(dockerfile || node || spring || python || go || dotnet)) return;
-      String runtime = dockerfile ? "DOCKERFILE" : spring ? "SPRING_BOOT" : node ? "NODE" : python ? "PYTHON" : go ? "GO" : "DOTNET";
+      String runtime = spring ? "SPRING_BOOT" : node ? "NODE" : python ? "PYTHON" : go ? "GO" : dotnet ? "DOTNET" : "DOCKERFILE";
       boolean publicCandidate = node && (relative.toLowerCase(Locale.ROOT).contains("front") || relative.equals("."));
       if (spring || python || go || dotnet) publicCandidate = !relative.toLowerCase(Locale.ROOT).contains("backend");
       int port = runtime.equals("SPRING_BOOT") ? 8080 : runtime.equals("NODE") ? 3000 : runtime.equals("PYTHON") ? 8000 : runtime.equals("GO") ? 8080 : 8080;

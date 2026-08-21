@@ -68,7 +68,14 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
       if (!buildContext.startsWith(workspace)) return failed("Unsafe service path was rejected.", plan);
       Path dockerfile = dockerfiles.ensure(buildContext, service.runtime());
       if (!service.hasDockerfile()) log.accept("Generated a reviewed Dockerfile template for " + service.runtime() + "; repository files were not otherwise changed.");
-      dockerfilePolicy.verify(dockerfile);
+      try {
+        dockerfilePolicy.verify(dockerfile);
+      } catch (IOException rejected) {
+        if (!service.hasDockerfile()) throw rejected;
+        dockerfile = dockerfiles.reviewedFallback(buildContext, service.runtime());
+        dockerfilePolicy.verify(dockerfile);
+        log.accept("Repository Dockerfile was rejected by policy; generated a reviewed replacement only in the temporary checkout.");
+      }
       applicationPort = detectedApplicationPort(dockerfile, service.port(), log);
       if (publicPort == 0) {
         publicPort = nextPublicPort();

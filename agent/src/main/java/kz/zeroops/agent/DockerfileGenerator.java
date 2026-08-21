@@ -25,4 +25,12 @@ class DockerfileGenerator {
     Files.writeString(dockerfile, template, StandardOpenOption.CREATE_NEW);
     return dockerfile;
   }
+
+  Path reviewedFallback(Path servicePath, String runtime) throws IOException {
+    String template = TEMPLATES.get(runtime);
+    if (template == null) throw new IOException("No reviewed Dockerfile template exists for " + runtime);
+    Path dockerfile = servicePath.resolve("Dockerfile.autodeploy");
+    Files.writeString(dockerfile, template, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+    return dockerfile;
+  }
 }
