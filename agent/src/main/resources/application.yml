@@ -10,6 +10,8 @@ agent:
   identity-path: ${AGENT_IDENTITY_PATH:/var/lib/autodeploy-agent/identity.json}
   poll-ms: ${AGENT_POLL_MS:5000}
   execution-mode: ${AGENT_EXECUTION_MODE:dry-run}
+  github-deploy-key: ${AGENT_GITHUB_DEPLOY_KEY:/tmp/.ssh/github_deploy_key}
+  github-known-hosts: ${AGENT_GITHUB_KNOWN_HOSTS:/tmp/.ssh/known_hosts}
   # Required only by the Docker executor. The Agent joins a project's private
   # network temporarily for the HTTP health check and disconnects afterwards.
   container-name: ${AGENT_CONTAINER_NAME:}

@@ -21,15 +21,18 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
   private static final int LAST_PUBLIC_PORT = 18999;
   private final String agentContainerName;
   private final String githubDeployKey;
+  private final String githubKnownHosts;
   private final RepositoryScanner scanner;
   private final DockerfileGenerator dockerfiles;
   private final DockerfilePolicy dockerfilePolicy;
 
   DockerDeploymentExecutor(@Value("${agent.container-name:}") String agentContainerName,
                            @Value("${agent.github-deploy-key:/run/autodeploy/github_deploy_key}") String githubDeployKey,
+                           @Value("${agent.github-known-hosts:/tmp/.ssh/known_hosts}") String githubKnownHosts,
                            RepositoryScanner scanner, DockerfileGenerator dockerfiles, DockerfilePolicy dockerfilePolicy) {
     this.agentContainerName = agentContainerName;
     this.githubDeployKey = githubDeployKey;
+    this.githubKnownHosts = githubKnownHosts;
     this.scanner = scanner;
     this.dockerfiles = dockerfiles;
     this.dockerfilePolicy = dockerfilePolicy;
@@ -158,7 +161,7 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
     }
     try {
       ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true);
-      builder.environment().put("GIT_SSH_COMMAND", "ssh -i " + githubDeployKey + " -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes");
+      builder.environment().put("GIT_SSH_COMMAND", "ssh -i " + githubDeployKey + " -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=" + githubKnownHosts);
       Process process = builder.start(); stream(process, log);
       if (!process.waitFor(10, java.util.concurrent.TimeUnit.MINUTES)) { process.destroyForcibly(); return false; }
       return process.exitValue() == 0;
