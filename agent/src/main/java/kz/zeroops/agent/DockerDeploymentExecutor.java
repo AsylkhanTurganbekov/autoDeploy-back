@@ -17,6 +17,8 @@ import org.springframework.stereotype.Component;
 @Component
 @ConditionalOnProperty(name = "agent.execution-mode", havingValue = "docker")
 class DockerDeploymentExecutor implements DeploymentExecutor {
+  private static final int FIRST_PUBLIC_PORT = 18100;
+  private static final int LAST_PUBLIC_PORT = 18999;
   private final String agentContainerName;
 
   DockerDeploymentExecutor(@Value("${agent.container-name:}") String agentContainerName) {
@@ -28,12 +30,20 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
     String network = "autodeploy-net-" + manifest.projectId();
     String name = "autodeploy-" + manifest.projectId() + "-" + manifest.deploymentId();
     String previousImage = null;
+    int applicationPort = manifest.applicationPort();
+    int publicPort = manifest.publicPort();
     boolean agentConnected = false;
     try {
       workspace = Files.createTempDirectory("autodeploy-" + manifest.deploymentId() + "-");
       log.accept("Checking out the verified GitHub commit.");
       if (!run(List.of("git", "clone", "--depth", "1", "--branch", manifest.branch(), manifest.repositoryUrl(), workspace.toString()), log)) return failed("Git checkout failed.");
       if (!run(List.of("git", "-C", workspace.toString(), "checkout", "--detach", manifest.commitSha()), log)) return failed("Requested commit is unavailable.");
+      applicationPort = detectedApplicationPort(workspace, manifest.applicationPort(), log);
+      if (publicPort == 0) {
+        publicPort = nextPublicPort();
+        if (publicPort == 0) return failed("No free AutoDeploy public port is available in range 18100-18999.");
+        log.accept("Agent selected external port " + publicPort + " from the AutoDeploy range.");
+      }
       if (!run(List.of("docker", "network", "inspect", network), log)) {
         log.accept("Creating isolated project network.");
         if (!run(List.of("docker", "network", "create", "--label", "io.autodeploy.managed=true", "--label", "io.autodeploy.project=" + manifest.projectId(), network), log)) return failed("Project network cannot be created.");
@@ -42,18 +52,18 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
       if (!run(List.of("docker", "build", "--pull", "--tag", manifest.imageTag(), workspace.toString()), log)) return failed("Docker image build failed.");
       previousImage = previousImage(manifest.projectId(), log);
       stopManagedProject(manifest.projectId(), log);
-      if (!start(name, manifest.imageTag(), network, manifest, log)) {
-        restore(previousImage, network, manifest, log);
+      if (!start(name, manifest.imageTag(), network, manifest, applicationPort, publicPort, log)) {
+        restore(previousImage, network, manifest, applicationPort, publicPort, log);
         return failed("Docker rejected the isolated container.");
       }
       agentConnected = connectAgent(network, log);
       String privateIp = agentConnected ? containerIp(name, log) : null;
-      if (privateIp == null || privateIp.isBlank() || !healthy(privateIp, manifest, log)) {
+      if (privateIp == null || privateIp.isBlank() || !healthy(privateIp, applicationPort, manifest.healthPath(), log)) {
         run(List.of("docker", "rm", "--force", name), log);
-        restore(previousImage, network, manifest, log);
+        restore(previousImage, network, manifest, applicationPort, publicPort, log);
         return failed("Health check failed; previous image was restored when available.");
       }
-      return new ExecutionResult(true, "Image built, isolated container started and health check passed.", null);
+      return new ExecutionResult(true, "Image built, isolated container started and health check passed on port " + publicPort + ".", null, applicationPort, publicPort, manifest.runtime(), manifest.healthPath());
     } catch (IOException e) { return failed("Agent workspace is unavailable."); }
     finally {
       if (agentConnected) run(List.of("docker", "network", "disconnect", network, agentContainerName), log);
@@ -61,13 +71,13 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
     }
   }
 
-  private boolean start(String name, String image, String network, AgentBoundary.Manifest manifest, Consumer<String> log) {
+  private boolean start(String name, String image, String network, AgentBoundary.Manifest manifest, int applicationPort, int publicPort, Consumer<String> log) {
     return run(List.of("docker", "run", "--detach", "--name", name,
         "--label", "io.autodeploy.managed=true", "--label", "io.autodeploy.project=" + manifest.projectId(),
-        "--label", "io.autodeploy.application-port=" + manifest.applicationPort(), "--label", "io.autodeploy.public-port=" + manifest.publicPort(),
+        "--label", "io.autodeploy.application-port=" + applicationPort, "--label", "io.autodeploy.public-port=" + publicPort,
         "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         "--pids-limit", "256", "--memory", "512m", "--cpus", "1.0", "--network", network,
-        "--publish", "0.0.0.0:" + manifest.publicPort() + ":" + manifest.applicationPort(), image), log);
+        "--publish", "0.0.0.0:" + publicPort + ":" + applicationPort, image), log);
   }
 
   private String previousImage(String projectId, Consumer<String> log) {
@@ -77,10 +87,10 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
   private void stopManagedProject(String projectId, Consumer<String> log) {
     for (String id : output(List.of("docker", "ps", "-aq", "--filter", "label=io.autodeploy.managed=true", "--filter", "label=io.autodeploy.project=" + projectId), log)) run(List.of("docker", "rm", "--force", id), log);
   }
-  private void restore(String image, String network, AgentBoundary.Manifest manifest, Consumer<String> log) {
+  private void restore(String image, String network, AgentBoundary.Manifest manifest, int applicationPort, int publicPort, Consumer<String> log) {
     if (image == null || image.isBlank()) return;
     log.accept("Restoring the previous managed image.");
-    start("autodeploy-" + manifest.projectId() + "-rollback-" + manifest.deploymentId(), image, network, manifest, log);
+    start("autodeploy-" + manifest.projectId() + "-rollback-" + manifest.deploymentId(), image, network, manifest, applicationPort, publicPort, log);
   }
   private boolean connectAgent(String network, Consumer<String> log) {
     if (agentContainerName == null || agentContainerName.isBlank()) {
@@ -92,8 +102,8 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
   private String containerIp(String containerName, Consumer<String> log) {
     return first(output(List.of("docker", "inspect", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", containerName), log));
   }
-  private boolean healthy(String privateIp, AgentBoundary.Manifest manifest, Consumer<String> log) {
-    String url = "http://" + privateIp + ":" + manifest.applicationPort() + manifest.healthPath();
+  private boolean healthy(String privateIp, int applicationPort, String healthPath, Consumer<String> log) {
+    String url = "http://" + privateIp + ":" + applicationPort + healthPath;
     for (int attempt = 1; attempt <= 30; attempt++) {
       if (probe(url)) { log.accept("Health check passed."); return true; }
       try { Thread.sleep(1000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return false; }
@@ -110,6 +120,39 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
     catch (InterruptedException e) { Thread.currentThread().interrupt(); return false; }
   }
 
+  /** Static inspection only: the Agent never runs repository scripts to guess configuration. */
+  private int detectedApplicationPort(Path workspace, int fallback, Consumer<String> log) {
+    Path dockerfile = workspace.resolve("Dockerfile");
+    if (!Files.isRegularFile(dockerfile)) {
+      log.accept("No Dockerfile found at repository root; using configured internal port " + fallback + ".");
+      return fallback;
+    }
+    try {
+      for (String line : Files.readAllLines(dockerfile)) {
+        String normalized = line.trim();
+        if (normalized.matches("(?i)^EXPOSE\\s+[0-9]{1,5}(/tcp)?\\s*$")) {
+          String digits = normalized.replaceFirst("(?i)^EXPOSE\\s+", "").replaceAll("[^0-9]", "");
+          int detected = Integer.parseInt(digits);
+          if (detected > 0 && detected < 65536) {
+            log.accept("Static Dockerfile analysis detected internal port " + detected + ".");
+            return detected;
+          }
+        }
+      }
+    } catch (IOException ignored) { log.accept("Dockerfile could not be read; using configured internal port " + fallback + "."); }
+    log.accept("Dockerfile exposes no supported port; using configured internal port " + fallback + ".");
+    return fallback;
+  }
+
+  private int nextPublicPort() {
+    for (int port = FIRST_PUBLIC_PORT; port <= LAST_PUBLIC_PORT; port++) {
+      List<String> used = output(List.of("docker", "ps", "--format", "{{.Ports}}"), ignored -> { });
+      boolean occupied = used.stream().anyMatch(value -> value.matches(".*[:.]" + port + "->.*"));
+      if (!occupied) return port;
+    }
+    return 0;
+  }
+
   private boolean run(List<String> command, Consumer<String> log) {
     try { Process process = new ProcessBuilder(command).redirectErrorStream(true).start(); stream(process, log); if (!process.waitFor(10, java.util.concurrent.TimeUnit.MINUTES)) { process.destroyForcibly(); return false; } return process.exitValue() == 0; }
     catch (IOException e) { log.accept("Agent executable is unavailable."); return false; }
@@ -121,6 +164,6 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
   private void stream(Process process, Consumer<String> log) throws IOException { try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) { String line; int sent = 0; while ((line = reader.readLine()) != null && sent++ < 500) log.accept(safe(line)); } }
   private static String safe(String line) { String sanitized = line.replaceAll("(?i)(token|password|secret|authorization)\\s*[=:]\\s*[^\\s]+", "$1=[redacted]"); return sanitized.substring(0, Math.min(sanitized.length(), 900)); }
   private static String first(List<String> lines) { return lines.isEmpty() ? null : lines.getFirst(); }
-  private static ExecutionResult failed(String reason) { return new ExecutionResult(false, reason, reason); }
+  private static ExecutionResult failed(String reason) { return new ExecutionResult(false, reason, reason, null, null, null, null); }
   private static void deleteWorkspace(Path workspace) { if (workspace == null) return; try (var paths = Files.walk(workspace)) { paths.sorted(Comparator.reverseOrder()).forEach(path -> { try { Files.deleteIfExists(path); } catch (IOException ignored) { } }); } catch (IOException ignored) { } }
 }

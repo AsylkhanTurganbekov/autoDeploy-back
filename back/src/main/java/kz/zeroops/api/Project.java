@@ -32,6 +32,13 @@ public class Project {
   }
   public void assignOwner(AppUser owner) { this.owner = owner; }
   public void assignTargetServer(ManagedServer server) { this.targetServer = server; }
+  /** Values reported by a verified Agent only; users cannot use this path to claim host ports. */
+  public void applyAgentResolvedConfiguration(ProjectRuntime runtime, int applicationPort, int publicPort, String healthPath) {
+    this.runtime = runtime;
+    this.applicationPort = applicationPort;
+    this.publicPort = publicPort;
+    this.healthPath = healthPath;
+  }
   public Long getId() { return id; }
   public String getName() { return name; }
   public String getSlug() { return slug; }
