@@ -87,7 +87,10 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
         if (!run(List.of("docker", "network", "create", "--label", "io.autodeploy.managed=true", "--label", "io.autodeploy.project=" + manifest.projectId(), network), log)) return failed("Project network cannot be created.", plan);
       }
       log.accept("Building immutable Docker image.");
-      if (!run(List.of("docker", "build", "--pull", "--file", dockerfile.toString(), "--tag", manifest.imageTag(), buildContext.toString()), log)) return failed("Docker image build failed.", plan);
+      // Do not force a registry pull for every deployment.  A pull can block an
+      // otherwise valid deployment when the registry is temporarily unavailable;
+      // Docker will still fetch an image when it is not already cached.
+      if (!run(List.of("docker", "build", "--file", dockerfile.toString(), "--tag", manifest.imageTag(), buildContext.toString()), log)) return failed("Docker image build failed or timed out.", plan);
       previousImage = previousImage(manifest.projectId(), log);
       stopManagedProject(manifest.projectId(), log);
       if (!start(name, manifest.imageTag(), network, manifest, applicationPort, publicPort, log)) {
