@@ -32,7 +32,7 @@ class AgentPoller {
       Signed signed = json.readValue(response.body(), Signed.class);
       var manifest = verifier.verify(signed.payload(), signed.signature(), serverId);
       if (manifest.isEmpty() || !new AgentBoundary().accepts(manifest.get())) {
-        if (manifest.isPresent()) result(manifest.get().deploymentId(), false, "Agent rejected unsafe or expired deployment manifest.", "Manifest validation failed");
+        if (manifest.isPresent()) result(manifest.get().deploymentId(), new DeploymentExecutor.ExecutionResult(false, "Agent rejected unsafe or expired deployment manifest.", "Manifest validation failed", null, null, null, null));
         return;
       }
       DeploymentExecutor.ExecutionResult executed=executor.execute(manifest.get(),line->log(manifest.get().deploymentId(),line)); log(manifest.get().deploymentId(),executed.message()); result(manifest.get().deploymentId(),executed);
