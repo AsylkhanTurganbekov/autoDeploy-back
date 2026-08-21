@@ -95,7 +95,11 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
         return failed("Health check failed; previous image was restored when available.", plan);
       }
       return new ExecutionResult(true, "Image built, isolated container started and health check passed on port " + publicPort + ".", null, applicationPort, publicPort, service.runtime(), manifest.healthPath(), plan);
-    } catch (IOException e) { return new ExecutionResult(false, "Agent workspace is unavailable.", "Agent workspace is unavailable.", null, null, null, null, plan); }
+    } catch (IOException e) {
+      String reason = e.getMessage() == null || e.getMessage().isBlank() ? "Agent workspace is unavailable." : safe(e.getMessage());
+      log.accept(reason);
+      return new ExecutionResult(false, reason, reason, null, null, null, null, plan);
+    }
     finally {
       if (agentConnected) run(List.of("docker", "network", "disconnect", network, agentContainerName), log);
       deleteWorkspace(workspace);
