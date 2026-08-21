@@ -190,7 +190,11 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
   }
 
   private RepositoryScanner.Service selectService(List<RepositoryScanner.Service> services, String requestedPath) {
-    if (requestedPath != null && !requestedPath.isBlank()) return services.stream().filter(s -> s.path().equals(requestedPath)).findFirst().orElse(null);
+    // A first deployment has no persisted service selection. The manifest's legacy
+    // root marker must therefore mean "auto-select", not "build the repository root".
+    if (requestedPath != null && !requestedPath.isBlank() && !requestedPath.equals(".")) {
+      return services.stream().filter(s -> s.path().equals(requestedPath)).findFirst().orElse(null);
+    }
     List<RepositoryScanner.Service> publicServices = services.stream().filter(RepositoryScanner.Service::publicCandidate).toList();
     if (publicServices.size() == 1) return publicServices.getFirst();
     return services.size() == 1 ? services.getFirst() : null;
