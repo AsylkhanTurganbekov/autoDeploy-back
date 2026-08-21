@@ -20,9 +20,12 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
   private static final int FIRST_PUBLIC_PORT = 18100;
   private static final int LAST_PUBLIC_PORT = 18999;
   private final String agentContainerName;
+  private final String githubDeployKey;
 
-  DockerDeploymentExecutor(@Value("${agent.container-name:}") String agentContainerName) {
+  DockerDeploymentExecutor(@Value("${agent.container-name:}") String agentContainerName,
+                           @Value("${agent.github-deploy-key:/run/autodeploy/github_deploy_key}") String githubDeployKey) {
     this.agentContainerName = agentContainerName;
+    this.githubDeployKey = githubDeployKey;
   }
 
   @Override public ExecutionResult execute(AgentBoundary.Manifest manifest, Consumer<String> log) {
@@ -36,7 +39,7 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
     try {
       workspace = Files.createTempDirectory("autodeploy-" + manifest.deploymentId() + "-");
       log.accept("Checking out the verified GitHub commit.");
-      if (!run(List.of("git", "clone", "--depth", "1", "--branch", manifest.branch(), manifest.repositoryUrl(), workspace.toString()), log)) return failed("Git checkout failed.");
+      if (!clone(manifest.repositoryUrl(), manifest.branch(), workspace, log)) return failed("Git checkout failed.");
       if (!run(List.of("git", "-C", workspace.toString(), "checkout", "--detach", manifest.commitSha()), log)) return failed("Requested commit is unavailable.");
       applicationPort = detectedApplicationPort(workspace, manifest.applicationPort(), log);
       if (publicPort == 0) {
@@ -118,6 +121,24 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
       return process.exitValue() == 0;
     } catch (IOException e) { return false; }
     catch (InterruptedException e) { Thread.currentThread().interrupt(); return false; }
+  }
+
+  private boolean clone(String repositoryUrl, String branch, Path workspace, Consumer<String> log) {
+    List<String> command = List.of("git", "clone", "--depth", "1", "--branch", branch, repositoryUrl, workspace.toString());
+    if (!repositoryUrl.startsWith("git@github.com:")) return run(command, log);
+    Path key = Path.of(githubDeployKey);
+    if (!Files.isRegularFile(key)) {
+      log.accept("SSH repository was requested but the read-only deploy key is unavailable.");
+      return false;
+    }
+    try {
+      ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true);
+      builder.environment().put("GIT_SSH_COMMAND", "ssh -i " + githubDeployKey + " -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes");
+      Process process = builder.start(); stream(process, log);
+      if (!process.waitFor(10, java.util.concurrent.TimeUnit.MINUTES)) { process.destroyForcibly(); return false; }
+      return process.exitValue() == 0;
+    } catch (IOException e) { log.accept("SSH git executable is unavailable."); return false; }
+      catch (InterruptedException e) { Thread.currentThread().interrupt(); return false; }
   }
 
   /** Static inspection only: the Agent never runs repository scripts to guess configuration. */
