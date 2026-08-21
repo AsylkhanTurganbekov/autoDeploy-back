@@ -23,7 +23,7 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
   private final String githubDeployKey;
 
   DockerDeploymentExecutor(@Value("${agent.container-name:}") String agentContainerName,
-                           @Value("${agent.github-deploy-key:/run/autodeploy/github_deploy_key}") String githubDeployKey) {
+                           @Value("${agent.github-deploy-key:/tmp/.ssh/github_deploy_key}") String githubDeployKey) {
     this.agentContainerName = agentContainerName;
     this.githubDeployKey = githubDeployKey;
   }
