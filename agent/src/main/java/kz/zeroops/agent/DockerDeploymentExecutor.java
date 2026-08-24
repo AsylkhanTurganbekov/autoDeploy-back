@@ -87,12 +87,14 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
       if (!run(List.of("docker", "build", "--pull", "--file", dockerfile.toString(), "--tag", manifest.imageTag(), buildContext.toString()), log)) return failed("Docker image build failed.", plan);
       previousImage = previousImage(manifest.projectId(), log);
       stopManagedProject(manifest.projectId(), log);
+      log.accept("Starting isolated container.");
       if (!start(name, manifest.imageTag(), network, manifest, applicationPort, publicPort, log)) {
         restore(previousImage, network, manifest, applicationPort, publicPort, log);
         return failed("Docker rejected the isolated container.", plan);
       }
       agentConnected = connectAgent(network, log);
       String privateIp = agentConnected ? containerIp(name, log) : null;
+      log.accept("Starting health check.");
       if (privateIp == null || privateIp.isBlank() || !healthy(privateIp, applicationPort, manifest.healthPath(), log)) {
         run(List.of("docker", "rm", "--force", name), log);
         restore(previousImage, network, manifest, applicationPort, publicPort, log);
