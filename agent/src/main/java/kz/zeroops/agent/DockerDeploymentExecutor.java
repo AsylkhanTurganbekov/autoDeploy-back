@@ -25,17 +25,19 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
   private final RepositoryScanner scanner;
   private final DockerfileGenerator dockerfiles;
   private final DockerfilePolicy dockerfilePolicy;
+  private final RepositoryCredentialProvider credentials;
 
   DockerDeploymentExecutor(@Value("${agent.container-name:}") String agentContainerName,
                            @Value("${agent.github-deploy-key:/tmp/.ssh/github_deploy_key}") String githubDeployKey,
                            @Value("${agent.github-known-hosts:/run/autodeploy/github_known_hosts}") String githubKnownHosts,
-                           RepositoryScanner scanner, DockerfileGenerator dockerfiles, DockerfilePolicy dockerfilePolicy) {
+                           RepositoryScanner scanner, DockerfileGenerator dockerfiles, DockerfilePolicy dockerfilePolicy, RepositoryCredentialProvider credentials) {
     this.agentContainerName = agentContainerName;
     this.githubDeployKey = githubDeployKey;
     this.githubKnownHosts = githubKnownHosts;
     this.scanner = scanner;
     this.dockerfiles = dockerfiles;
     this.dockerfilePolicy = dockerfilePolicy;
+    this.credentials = credentials;
   }
 
   @Override public ExecutionResult execute(AgentBoundary.Manifest manifest, Consumer<String> log) {
@@ -52,7 +54,7 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
       if (preflightFailure != null) return failed(preflightFailure);
       workspace = Files.createTempDirectory("autodeploy-" + manifest.deploymentId() + "-");
       log.accept("Checking out the verified GitHub commit.");
-      if (!clone(manifest.repositoryUrl(), manifest.branch(), workspace, log)) return failed("Git checkout failed.");
+      if (!clone(manifest.repositoryUrl(), manifest.branch(), workspace, credentials.githubToken(manifest.deploymentId()).orElse(null), log)) return failed("Git checkout failed.");
       if (manifest.commitSha().matches("[A-Fa-f0-9]{7,64}")
           && !run(List.of("git", "-C", workspace.toString(), "checkout", "--detach", manifest.commitSha()), log)) {
         return failed("Requested commit is unavailable.");
@@ -173,8 +175,9 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
     catch (InterruptedException e) { Thread.currentThread().interrupt(); return false; }
   }
 
-  private boolean clone(String repositoryUrl, String branch, Path workspace, Consumer<String> log) {
+  private boolean clone(String repositoryUrl, String branch, Path workspace, String githubToken, Consumer<String> log) {
     List<String> command = List.of("git", "clone", "--depth", "1", "--branch", branch, repositoryUrl, workspace.toString());
+    if (repositoryUrl.startsWith("https://github.com/") && githubToken != null) return cloneWithToken(command, workspace, githubToken, log);
     if (!repositoryUrl.startsWith("git@github.com:")) return run(command, log);
     Path key = Path.of(githubDeployKey);
     if (!Files.isRegularFile(key)) {
@@ -189,6 +192,19 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
       return process.exitValue() == 0;
     } catch (IOException e) { log.accept("SSH git executable is unavailable."); return false; }
       catch (InterruptedException e) { Thread.currentThread().interrupt(); return false; }
+  }
+
+  private boolean cloneWithToken(List<String> command, Path workspace, String token, Consumer<String> log) {
+    Path askPass = null;
+    try {
+      askPass = Files.createTempFile(workspace.getParent(), "github-askpass-", ".sh");
+      Files.writeString(askPass, "#!/bin/sh\ncase \"$1\" in *Username*) printf '%s\\n' x-access-token;; *) printf '%s\\n' \"$AUTODEPLOY_GITHUB_TOKEN\";; esac\n");
+      Files.setPosixFilePermissions(askPass, java.util.Set.of(java.nio.file.attribute.PosixFilePermission.OWNER_READ,java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE));
+      ProcessBuilder builder=new ProcessBuilder(command).redirectErrorStream(true);
+      builder.environment().put("GIT_ASKPASS",askPass.toString()); builder.environment().put("GIT_TERMINAL_PROMPT","0"); builder.environment().put("AUTODEPLOY_GITHUB_TOKEN",token);
+      Process process=builder.start(); stream(process,log); if(!process.waitFor(10,java.util.concurrent.TimeUnit.MINUTES)){process.destroyForcibly();return false;} return process.exitValue()==0;
+    } catch (Exception e) { log.accept("GitHub HTTPS credential helper is unavailable."); return false; }
+    finally { if(askPass!=null)try{Files.deleteIfExists(askPass);}catch(IOException ignored){} }
   }
 
   /** Static inspection only: the Agent never runs repository scripts to guess configuration. */
