@@ -48,6 +48,8 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
     List<DeploymentExecutor.ServicePlan> plan = List.of();
     boolean agentConnected = false;
     try {
+      String preflightFailure = preflight(log);
+      if (preflightFailure != null) return failed(preflightFailure);
       workspace = Files.createTempDirectory("autodeploy-" + manifest.deploymentId() + "-");
       log.accept("Checking out the verified GitHub commit.");
       if (!clone(manifest.repositoryUrl(), manifest.branch(), workspace, log)) return failed("Git checkout failed.");
@@ -100,6 +102,26 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
       if (agentConnected) run(List.of("docker", "network", "disconnect", network, agentContainerName), log);
       deleteWorkspace(workspace);
     }
+  }
+
+  /** Checks only the Agent's own prerequisites before an untrusted repository is read. */
+  private String preflight(Consumer<String> log) {
+    log.accept("Preflight: checking Docker daemon, socket access, disk space and AutoDeploy port range.");
+    if (!run(List.of("docker", "version", "--format", "{{.Server.Version}}"), log))
+      return "Agent cannot access the Docker daemon. Check the AutoDeploy Agent Docker socket group.";
+    if (!run(List.of("docker", "info", "--format", "{{.Driver}}"), log))
+      return "Docker daemon is unavailable for the AutoDeploy Agent.";
+    List<String> disk = output(List.of("df", "-Pk", "/tmp"), ignored -> { });
+    if (disk.size() > 1) {
+      String[] fields = disk.get(1).trim().split("\\s+");
+      if (fields.length >= 4) try {
+        long availableKb = Long.parseLong(fields[3]);
+        if (availableKb < 1_048_576L) return "Agent workspace has less than 1 GiB free; free space before deployment.";
+      } catch (NumberFormatException ignored) { log.accept("Preflight: disk capacity could not be parsed."); }
+    }
+    if (nextPublicPort() == 0) return "No free AutoDeploy public port is available in range 18100-18999.";
+    log.accept("Preflight passed.");
+    return null;
   }
 
   private boolean start(String name, String image, String network, AgentBoundary.Manifest manifest, int applicationPort, int publicPort, Consumer<String> log) {
