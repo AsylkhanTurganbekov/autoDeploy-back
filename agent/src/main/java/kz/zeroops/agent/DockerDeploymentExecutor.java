@@ -155,7 +155,7 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
         composeLogs(base, log); composeDown(base, log);
         return failed("Compose health check failed; only the current Compose deployment was stopped.");
       }
-      stopManagedProjectExcept(manifest.projectId(), ids, log);
+      stopManagedProjectExcept(manifest.projectId(), project, log);
       List<DeploymentExecutor.ServicePlan> plan = stack.services().stream().map(service -> new DeploymentExecutor.ServicePlan(service.name(), ".", "DOCKERFILE", service.internalPort(), service.name().equals(primary.name()), true, List.of("Compose role: " + service.role(), "Compose: " + composeFile.getFileName()))).toList();
       return new ExecutionResult(true, "Compose stack started and health check passed on port " + publicPort + ".", null, primary.internalPort(), publicPort, "DOCKERFILE", manifest.healthPath(), plan);
     } finally { if (connected) run(List.of("docker", "network", "disconnect", network, agentContainerName), log); }
@@ -221,7 +221,13 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
   private void composeDown(List<String> base, Consumer<String> log) { List<String> command = new ArrayList<>(base); command.addAll(List.of("down", "--remove-orphans")); run(command, log); }
   private void composeLogs(List<String> base, Consumer<String> log) { log.accept("Docker Compose logs for the current deployment:"); List<String> command = new ArrayList<>(base); command.addAll(List.of("logs", "--no-color", "--tail", "200")); run(command, log); }
   private String composeContainerIp(String id, String network) { return first(outputQuiet(List.of("docker", "inspect", "--format", "{{with index .NetworkSettings.Networks \"" + network + "\"}}{{.IPAddress}}{{end}}", id))); }
-  private void stopManagedProjectExcept(String projectId, List<String> keep, Consumer<String> log) { for (String id : output(List.of("docker", "ps", "-aq", "--filter", "label=io.autodeploy.managed=true", "--filter", "label=io.autodeploy.project=" + projectId), log)) if (!keep.contains(id)) run(List.of("docker", "rm", "--force", id), log); }
+  /** Keep the just-started Compose project by Docker's immutable Compose project label, not by transient ps output. */
+  private void stopManagedProjectExcept(String projectId, String composeProject, Consumer<String> log) {
+    Set<String> keep = new HashSet<>(outputQuiet(List.of("docker", "ps", "-aq", "--filter", "label=com.docker.compose.project=" + composeProject)));
+    for (String id : output(List.of("docker", "ps", "-aq", "--filter", "label=io.autodeploy.managed=true", "--filter", "label=io.autodeploy.project=" + projectId), log)) {
+      if (!keep.contains(id)) run(List.of("docker", "rm", "--force", id), log);
+    }
+  }
   private static String composeRole(String name) { String value=name.toLowerCase(); if(value.matches(".*(postgres|mysql|mariadb|mongo|database|\\bdb\\b).*$")) return "DATABASE"; if(value.contains("redis")||value.contains("cache")) return "CACHE"; if(value.contains("worker")||value.contains("queue")) return "WORKER"; if(value.matches(".*(front|web|nginx|ui).*$")) return "FRONTEND"; if(value.matches(".*(back|api|app|server).*$")) return "BACKEND"; return "INTERNAL"; }
   private record ComposeService(String name, int internalPort, String role) { }
   private record ComposeStack(ComposeService primary, List<ComposeService> services) { }
