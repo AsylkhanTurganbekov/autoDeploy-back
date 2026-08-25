@@ -20,6 +20,7 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
   private static final int FIRST_PUBLIC_PORT = 18100;
   private static final int LAST_PUBLIC_PORT = 18999;
   private final String agentContainerName;
+  private final String workspaceRoot;
   private final String githubDeployKey;
   private final String githubKnownHosts;
   private final RepositoryScanner scanner;
@@ -28,10 +29,12 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
   private final RepositoryCredentialProvider credentials;
 
   DockerDeploymentExecutor(@Value("${agent.container-name:}") String agentContainerName,
+                           @Value("${agent.workspace-root:/var/lib/autodeploy-agent/workspaces}") String workspaceRoot,
                            @Value("${agent.github-deploy-key:/tmp/.ssh/github_deploy_key}") String githubDeployKey,
                            @Value("${agent.github-known-hosts:/run/autodeploy/github_known_hosts}") String githubKnownHosts,
                            RepositoryScanner scanner, DockerfileGenerator dockerfiles, DockerfilePolicy dockerfilePolicy, RepositoryCredentialProvider credentials) {
     this.agentContainerName = agentContainerName;
+    this.workspaceRoot = workspaceRoot;
     this.githubDeployKey = githubDeployKey;
     this.githubKnownHosts = githubKnownHosts;
     this.scanner = scanner;
@@ -52,7 +55,9 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
     try {
       String preflightFailure = preflight(log);
       if (preflightFailure != null) return failed(preflightFailure);
-      workspace = Files.createTempDirectory("autodeploy-" + manifest.deploymentId() + "-");
+      Path root = Path.of(workspaceRoot);
+      Files.createDirectories(root);
+      workspace = Files.createTempDirectory(root, "autodeploy-" + manifest.deploymentId() + "-");
       log.accept("Checking out the verified GitHub commit.");
       if (!clone(manifest.repositoryUrl(), manifest.branch(), workspace, credentials.githubToken(manifest.deploymentId()).orElse(null), log)) return failed("Git checkout failed.");
       if (manifest.commitSha().matches("[A-Fa-f0-9]{7,64}")
@@ -115,7 +120,9 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
       return "Agent cannot access the Docker daemon. Check the AutoDeploy Agent Docker socket group.";
     if (!run(List.of("docker", "info", "--format", "{{.Driver}}"), log))
       return "Docker daemon is unavailable for the AutoDeploy Agent.";
-    List<String> disk = output(List.of("df", "-Pk", "/tmp"), ignored -> { });
+    try { Files.createDirectories(Path.of(workspaceRoot)); }
+    catch (IOException unavailable) { return "Agent workspace volume is unavailable or not writable."; }
+    List<String> disk = output(List.of("df", "-Pk", workspaceRoot), ignored -> { });
     if (disk.size() > 1) {
       String[] fields = disk.get(1).trim().split("\\s+");
       if (fields.length >= 4) try {
