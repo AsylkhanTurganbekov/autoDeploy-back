@@ -281,10 +281,10 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
   }
   private boolean healthy(String privateIp, int applicationPort, String healthPath, Consumer<String> log) {
     String url = "http://" + privateIp + ":" + applicationPort + healthPath;
-    for (int attempt = 1; attempt <= 30; attempt++) {
+    for (int attempt = 1; attempt <= 120; attempt++) {
       if (probe(url)) { log.accept("Health check passed."); return true; }
       try { Thread.sleep(1000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return false; }
-      if (attempt % 5 == 0) log.accept("Waiting for health check (attempt " + attempt + "/30).");
+      if (attempt % 10 == 0) log.accept("Waiting for health check (attempt " + attempt + "/120).");
     }
     return false;
   }
