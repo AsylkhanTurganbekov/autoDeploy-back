@@ -114,7 +114,7 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
         return failed("Health check failed; previous image was restored when available.", plan);
       }
       return new ExecutionResult(true, "Image built, isolated container started and health check passed on port " + publicPort + ".", null, applicationPort, publicPort, service.runtime(), manifest.healthPath(), plan);
-    } catch (IOException e) { return new ExecutionResult(false, "Agent workspace is unavailable.", "Agent workspace is unavailable.", null, null, null, null, plan); }
+    } catch (IOException e) { String reason = e.getMessage() == null || e.getMessage().isBlank() ? "Agent workspace is unavailable." : safe(e.getMessage()); log.accept(reason); return failed(reason, plan); }
     finally {
       if (agentConnected) run(List.of("docker", "network", "disconnect", network, agentContainerName), log);
       deleteWorkspace(workspace);
@@ -129,11 +129,12 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
     log.accept("Deployment method selected: COMPOSE.");
     log.accept("Compose file selected: " + composeFile.getFileName() + ".");
     sanitizeCompose(composeFile, sanitized);
-    ComposeService primary = primaryComposeService(project, sanitized);
-    if (primary == null) return failed("Compose stack has no unprofiled HTTP service with exactly one published port.");
+    ComposeStack stack = composeStack(project, sanitized);
+    if (stack == null) return failed("Compose stack has no unambiguous unprofiled HTTP service with exactly one published port.");
+    ComposeService primary = stack.primary();
     int publicPort = manifest.publicPort() == 0 ? nextPublicPort() : manifest.publicPort();
     if (publicPort == 0) return failed("No free AutoDeploy public port is available in range 18100-18999.");
-    writeComposeOverride(override, primary.name(), primary.internalPort(), publicPort, manifest);
+    writeComposeOverride(override, stack, publicPort, manifest);
     log.accept("Compose service selected: " + primary.name() + "; internal port " + primary.internalPort() + ", external port " + publicPort + ".");
     List<String> base = List.of("docker", "compose", "-p", project, "-f", sanitized.toString(), "-f", override.toString());
     List<String> up = new ArrayList<>(base); up.addAll(List.of("up", "-d", "--build"));
@@ -176,28 +177,37 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
     Files.write(target, kept);
   }
 
-  private ComposeService primaryComposeService(String project, Path compose) {
+  private ComposeStack composeStack(String project, Path compose) {
     List<String> command = List.of("docker", "compose", "-p", project, "-f", compose.toString(), "config", "--format", "json");
     try {
       List<String> result = outputQuiet(command);
       JsonNode services = json.readTree(String.join("\n", result)).path("services");
       List<ComposeService> candidates = new ArrayList<>();
+      List<String> activeServices = new ArrayList<>();
       java.util.Iterator<Map.Entry<String, JsonNode>> iterator = services.fields();
       while (iterator.hasNext()) {
         Map.Entry<String, JsonNode> entry = iterator.next();
         if (!entry.getKey().matches("[A-Za-z0-9_.-]{1,100}") || entry.getValue().has("profiles")) continue;
+        activeServices.add(entry.getKey());
         JsonNode ports = entry.getValue().path("ports");
         if (!ports.isArray() || ports.size() != 1) continue;
         int target = ports.get(0).path("target").asInt(0);
         if (target > 0 && target < 65536) candidates.add(new ComposeService(entry.getKey(), target));
       }
-      return candidates.size() == 1 ? candidates.getFirst() : null;
+      return candidates.size() == 1 ? new ComposeStack(candidates.getFirst(), List.copyOf(activeServices)) : null;
     } catch (Exception ignored) { return null; }
   }
 
-  private void writeComposeOverride(Path target, String service, int internalPort, int publicPort, AgentBoundary.Manifest manifest) throws IOException {
-    String yaml = "services:\n  " + service + ":\n    ports:\n      - target: " + internalPort + "\n        published: \"" + publicPort + "\"\n        host_ip: 0.0.0.0\n        protocol: tcp\n    labels:\n      io.autodeploy.managed: \"true\"\n      io.autodeploy.project: \"" + manifest.projectId() + "\"\n      io.autodeploy.deployment: \"" + manifest.deploymentId() + "\"\n";
-    Files.writeString(target, yaml);
+  private void writeComposeOverride(Path target, ComposeStack stack, int publicPort, AgentBoundary.Manifest manifest) throws IOException {
+    StringBuilder yaml = new StringBuilder("services:\n");
+    for (String service : stack.activeServices()) {
+      yaml.append("  ").append(service).append(":\n    labels:\n")
+          .append("      io.autodeploy.managed: \"true\"\n")
+          .append("      io.autodeploy.project: \"").append(manifest.projectId()).append("\"\n")
+          .append("      io.autodeploy.deployment: \"").append(manifest.deploymentId()).append("\"\n");
+      if (service.equals(stack.primary().name())) yaml.append("    ports:\n      - target: ").append(stack.primary().internalPort()).append("\n        published: \"").append(publicPort).append("\"\n        host_ip: 0.0.0.0\n        protocol: tcp\n");
+    }
+    Files.writeString(target, yaml.toString());
   }
 
   private List<String> composeOutput(List<String> base, List<String> tail) { List<String> command = new ArrayList<>(base); command.addAll(tail); return outputQuiet(command); }
@@ -206,6 +216,7 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
   private String composeContainerIp(String id, String network) { return first(outputQuiet(List.of("docker", "inspect", "--format", "{{with index .NetworkSettings.Networks \"" + network + "\"}}{{.IPAddress}}{{end}}", id))); }
   private void stopManagedProjectExcept(String projectId, List<String> keep, Consumer<String> log) { for (String id : output(List.of("docker", "ps", "-aq", "--filter", "label=io.autodeploy.managed=true", "--filter", "label=io.autodeploy.project=" + projectId), log)) if (!keep.contains(id)) run(List.of("docker", "rm", "--force", id), log); }
   private record ComposeService(String name, int internalPort) { }
+  private record ComposeStack(ComposeService primary, List<String> activeServices) { }
 
   /** Checks only the Agent's own prerequisites before an untrusted repository is read. */
   private String preflight(Consumer<String> log) {
