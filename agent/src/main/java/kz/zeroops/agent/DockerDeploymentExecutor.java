@@ -133,7 +133,7 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
     log.accept("Static plan: analyzing Compose services without starting repository code.");
     sanitizeCompose(composeFile, sanitized);
     ComposeStack stack = composeStack(project, sanitized);
-    if (stack == null) return failed("Compose stack has no unambiguous unprofiled HTTP service with exactly one published port.");
+    if (stack == null) return failed("Compose stack has no safe unambiguous HTTP service. Name the web/API service clearly or expose one internal HTTP port.");
     ComposeService primary = stack.primary();
     log.accept("Compose services and roles: " + String.join(", ", stack.services().stream().map(service -> service.name() + "=" + service.role()).toList()) + ".");
     int publicPort = manifest.publicPort() == 0 ? nextPublicPort() : manifest.publicPort();
@@ -196,14 +196,26 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
       while (iterator.hasNext()) {
         Map.Entry<String, JsonNode> entry = iterator.next();
         if (!entry.getKey().matches("[A-Za-z0-9_.-]{1,100}") || entry.getValue().has("profiles")) continue;
-        JsonNode ports = entry.getValue().path("ports");
-        int internalPort = ports.isArray() && ports.size() == 1 ? ports.get(0).path("target").asInt(0) : 0;
-        activeServices.add(new ComposeService(entry.getKey(), internalPort, composeRole(entry.getKey())));
-        if (!ports.isArray() || ports.size() != 1) continue;
-        if (internalPort > 0 && internalPort < 65536) candidates.add(new ComposeService(entry.getKey(), internalPort, composeRole(entry.getKey())));
+        int internalPort = composeInternalPort(entry.getValue());
+        String role = composeRole(entry.getKey());
+        ComposeService service = new ComposeService(entry.getKey(), internalPort, role);
+        activeServices.add(service);
+        if (internalPort > 0 && internalPort < 65536 && (role.equals("FRONTEND") || role.equals("BACKEND") || role.equals("INTERNAL"))) candidates.add(service);
       }
-      return candidates.size() == 1 ? new ComposeStack(candidates.getFirst(), List.copyOf(activeServices)) : null;
+      List<ComposeService> frontends = candidates.stream().filter(service -> service.role().equals("FRONTEND")).toList();
+      List<ComposeService> backends = candidates.stream().filter(service -> service.role().equals("BACKEND")).toList();
+      List<ComposeService> preferred = frontends.isEmpty() ? (backends.isEmpty() ? candidates : backends) : frontends;
+      return preferred.size() == 1 ? new ComposeStack(preferred.getFirst(), List.copyOf(activeServices)) : null;
     } catch (Exception ignored) { return null; }
+  }
+
+  /** Prefer a declared container target; Compose's host publication is ignored and replaced by AutoDeploy. */
+  private int composeInternalPort(JsonNode service) {
+    JsonNode ports = service.path("ports");
+    if (ports.isArray()) for (JsonNode port : ports) { int target = port.path("target").asInt(0); if (target > 0 && target < 65536) return target; }
+    JsonNode expose = service.path("expose");
+    if (expose.isArray()) for (JsonNode port : expose) { String value = port.asText("").replaceAll("[^0-9]", ""); try { int target = Integer.parseInt(value); if (target > 0 && target < 65536) return target; } catch (NumberFormatException ignored) { } }
+    return 0;
   }
 
   private void writeComposeOverride(Path target, ComposeStack stack, int publicPort, AgentBoundary.Manifest manifest) throws IOException {
