@@ -128,6 +128,7 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
     Path override = workspace.resolve(".autodeploy-compose.override.yml");
     log.accept("Deployment method selected: COMPOSE.");
     log.accept("Compose file selected: " + composeFile.getFileName() + ".");
+    log.accept("Static plan: analyzing Compose services without starting repository code.");
     sanitizeCompose(composeFile, sanitized);
     ComposeStack stack = composeStack(project, sanitized);
     if (stack == null) return failed("Compose stack has no unambiguous unprofiled HTTP service with exactly one published port.");
@@ -139,6 +140,7 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
     log.accept("Compose service selected: " + primary.name() + "; internal port " + primary.internalPort() + ", external port " + publicPort + ".");
     List<String> base = List.of("docker", "compose", "-p", project, "-f", sanitized.toString(), "-f", override.toString());
     List<String> up = new ArrayList<>(base); up.addAll(List.of("up", "-d", "--build"));
+    log.accept("Building Compose images.");
     log.accept("Starting isolated Compose stack.");
     if (!run(up, log)) { composeLogs(base, log); composeDown(base, log); return failed("Docker Compose could not start the current deployment."); }
     List<String> ids = composeOutput(base, List.of("ps", "-aq"));
