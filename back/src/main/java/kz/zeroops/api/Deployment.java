@@ -20,6 +20,8 @@ public class Deployment {
   public void moveTo(DeploymentStatus status) { this.status = status; this.updatedAt = Instant.now(); }
   public void attach(Project project) { this.project = project; }
   public void moveTo(DeploymentStatus status, String failureReason) { this.status = status; this.failureReason = failureReason; this.updatedAt = Instant.now(); }
+  /** A lease is only reclaimed after the Agent has been absent long enough to be considered stopped. */
+  public void requeueExpiredLease() { moveTo(DeploymentStatus.QUEUED, null); }
   public Long getId() { return id; }
   public String getProjectSlug() { return projectSlug; }
   public String getCommitSha() { return commitSha; }

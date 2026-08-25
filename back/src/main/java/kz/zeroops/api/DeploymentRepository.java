@@ -17,4 +17,7 @@ public interface DeploymentRepository extends JpaRepository<Deployment, Long> {
   Optional<Deployment> findWithProjectAndOwnerByIdForUpdate(Long id);
   @Query("select d from Deployment d join fetch d.project p where p.targetServer.id = :serverId and d.status = kz.zeroops.api.DeploymentStatus.QUEUED order by d.createdAt")
   List<Deployment> findQueuedForServer(Long serverId);
+  @Lock(LockModeType.PESSIMISTIC_WRITE)
+  @Query("select d from Deployment d join fetch d.project p where p.targetServer.id = :serverId and d.status in :statuses and d.updatedAt < :before and d.createdAt > :notBefore order by d.updatedAt")
+  List<Deployment> findExpiredLeasesForServer(Long serverId, java.util.Collection<DeploymentStatus> statuses, java.time.Instant before, java.time.Instant notBefore);
 }
