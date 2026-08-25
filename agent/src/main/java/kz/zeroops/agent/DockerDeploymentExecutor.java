@@ -173,7 +173,7 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
     List<String> kept = new ArrayList<>();
     for (String line : Files.readAllLines(source)) {
       String normalized = line.trim().toLowerCase();
-      if (normalized.matches("container_name\\s*:.*")) continue;
+      if (normalized.matches("(?:version|container_name)\\s*:.*")) continue;
       if (normalized.contains("/var/run/docker.sock") || normalized.matches("-\\s*/[^:]+:.*") || normalized.startsWith("source: /") || normalized.startsWith("privileged:") || normalized.startsWith("network_mode:") || normalized.startsWith("pid:") || normalized.startsWith("ipc:") || normalized.startsWith("cap_add:") || normalized.startsWith("security_opt:") || normalized.startsWith("devices:")) throw new IOException("Compose file violates the AutoDeploy isolation policy.");
       kept.add(line);
     }
@@ -184,7 +184,10 @@ class DockerDeploymentExecutor implements DeploymentExecutor {
     List<String> command = List.of("docker", "compose", "-p", project, "-f", compose.toString(), "config", "--format", "json");
     try {
       List<String> result = outputQuiet(command);
-      JsonNode services = json.readTree(String.join("\n", result)).path("services");
+      String configured = String.join("\n", result);
+      int jsonStart = configured.indexOf('{'), jsonEnd = configured.lastIndexOf('}');
+      if (jsonStart < 0 || jsonEnd <= jsonStart) return null;
+      JsonNode services = json.readTree(configured.substring(jsonStart, jsonEnd + 1)).path("services");
       List<ComposeService> candidates = new ArrayList<>();
       List<ComposeService> activeServices = new ArrayList<>();
       java.util.Iterator<Map.Entry<String, JsonNode>> iterator = services.fields();
