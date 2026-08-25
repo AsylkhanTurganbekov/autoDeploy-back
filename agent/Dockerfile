@@ -5,7 +5,7 @@ COPY src src
 RUN mvn -q -DskipTests package
 FROM eclipse-temurin:21-jre-alpine
 ARG DOCKER_GID=988
-RUN apk add --no-cache docker-cli docker-cli-compose git openssh-client \
+RUN apk add --no-cache docker-cli docker-cli-buildx docker-cli-compose git openssh-client \
     && addgroup -S agent && adduser -S agent -G agent \
     && addgroup -S -g "${DOCKER_GID}" docker-socket && addgroup agent docker-socket \
     && apk add --no-cache su-exec
